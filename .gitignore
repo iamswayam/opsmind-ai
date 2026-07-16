@@ -1,0 +1,19 @@
+# Secrets — never commit your actual API key
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Docker
+*.log
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/

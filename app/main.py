@@ -104,7 +104,7 @@ def chat(req: ChatRequest):
             cur.execute(
                 "SELECT c.content, d.filename FROM chunks c "
                 "JOIN documents d ON d.id = c.document_id "
-                "ORDER BY c.embedding <=> %s LIMIT %s",
+                "ORDER BY c.embedding <=> %s::vector LIMIT %s",
                 (question_embedding, TOP_K),
             )
             retrieved = cur.fetchall()

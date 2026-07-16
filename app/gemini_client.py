@@ -1,15 +1,30 @@
 import os
 from google import genai
+from google.genai import types
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("API Key not found. Please set GEMINI_API_KEY environment variable.")
 
-EMBED_MODEL = "gemini-embedding-001"   # check ai.google.dev for the current embedding model name
-CHAT_MODEL = "gemini-2.5-flash"        # fast + free-tier friendly
+# Default client uses the v1beta surface, which supports systemInstruction.
+# DO NOT pin http_options to api_version "v1" — that older surface doesn't
+# recognize systemInstruction/responseMimeType/responseSchema and will 400.
+client = genai.Client(api_key=api_key)
+
+EMBED_MODEL = "gemini-embedding-001"
+CHAT_MODEL = "gemini-flash-latest"   # alias, always points to Google's current GA flash model —
+                                      # avoids hard-coding a dated string that gets cut off early
 
 
 def embed_text(text: str) -> list[float]:
-    """Turn a chunk of text (or a user question) into a 768-dim vector."""
-    result = client.models.embed_content(model=EMBED_MODEL, contents=text)
+    """Turn a chunk of text (or a user question) into a 768-dim vector.
+    gemini-embedding-001 returns 3072 dims by default; output_dimensionality
+    truncates it to 768 to match the pgvector column (chunks.embedding VECTOR(768))."""
+    result = client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=text,
+        config=types.EmbedContentConfig(output_dimensionality=768),
+    )
     return result.embeddings[0].values
 
 
@@ -35,7 +50,7 @@ def generate_answer(question: str, context_chunks: list[str], history: list[dict
     response = client.models.generate_content(
         model=CHAT_MODEL,
         contents=prompt,
-        config={"system_instruction": system_instruction},
+        config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
     return response.text
 
