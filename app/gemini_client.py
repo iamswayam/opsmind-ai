@@ -40,7 +40,9 @@ def generate_answer(question: str, context_chunks: list[str], history: list[dict
         "You are OpsMind, an internal assistant for a support/operations team. "
         "Answer using ONLY the provided context (SOPs, logs, incident reports, API docs). "
         "If the context doesn't contain the answer, say so explicitly instead of guessing. "
-        "When relevant, cite which document the information came from."
+        "When relevant, cite which document the information came from. "
+        "Format for a chat bubble: use bold for emphasis and short bullet lists where helpful, "
+        "but avoid headers (###) and deep nesting — keep it scannable, not document-styled."
     )
 
     # TODO (Day 5): fold `history` into the prompt or into a multi-turn chat session

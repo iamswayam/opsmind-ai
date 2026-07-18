@@ -1,7 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from pypdf import PdfReader
-import io
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import io, os
 
 from app.db import get_connection
 from app.chunking import chunk_text
@@ -9,6 +12,13 @@ from app.gemini_client import embed_text, generate_answer
 
 app = FastAPI(title="OpsMind AI")
 
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
+
+
+@app.get("/")
+def serve_frontend():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 @app.get("/health")
 def health():
