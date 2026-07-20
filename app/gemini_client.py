@@ -1,6 +1,8 @@
 import os
+import time
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
 
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
@@ -11,21 +13,80 @@ if not api_key:
 # recognize systemInstruction/responseMimeType/responseSchema and will 400.
 client = genai.Client(api_key=api_key)
 
-EMBED_MODEL = "gemini-embedding-001"
-CHAT_MODEL = "gemini-flash-latest"   # alias, always points to Google's current GA flash model —
-                                      # avoids hard-coding a dated string that gets cut off early
+# Verify these against `client.models.list()` or ai.google.dev if you hit another 404 —
+# model names on the free tier get renamed/deprecated faster than this comment will stay accurate.
+EMBED_MODEL = "gemini-embedding-001"   # NOT "embedding-001" — that name 404s under v1
+
+# Ordered by actual daily quota headroom on this project's AI Studio dashboard
+# (checked directly — don't trust blog posts on this, quotas vary by project/date).
+# Highest RPD first. When one is exhausted or blocked, the next is tried automatically.
+CHAT_MODEL_FALLBACK_CHAIN = [
+    "gemini-3.1-flash-lite",   # 500 RPD — by far the most headroom of any text model here
+    "gemini-2.5-flash-lite",   # 20 RPD
+    "gemini-3-flash",          # 20 RPD
+    "gemini-2.5-flash",        # 20 RPD — may 404 as "no longer available to new users" on some projects
+    "gemini-3.5-flash",        # 20 RPD — was already exhausted as of this session
+]
+
+
+def _generate_with_fallback(contents, config=None):
+    """Shared call path for anything that needs client.models.generate_content.
+    Tries each model in CHAT_MODEL_FALLBACK_CHAIN in order:
+      - on a transient 5xx ServerError, retries the SAME model with backoff first
+      - on a 429 quota error or 404 (deprecated/unavailable) ClientError, moves to
+        the NEXT model in the chain instead of retrying — those won't clear in seconds
+      - on any other ClientError (e.g. malformed request), raises immediately —
+        that's a real bug, not something falling back to another model would fix
+    Raises the last error only if every model in the chain fails.
+    """
+    last_error = None
+    for model_name in CHAT_MODEL_FALLBACK_CHAIN:
+        for attempt in range(3):
+            try:
+                kwargs = {"model": model_name, "contents": contents}
+                if config is not None:
+                    kwargs["config"] = config
+                response = client.models.generate_content(**kwargs)
+                return response
+            except genai_errors.ServerError as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # 1s, then 2s — retry same model
+                    continue
+                break  # exhausted retries for this model, fall through to next model
+            except genai_errors.ClientError as e:
+                last_error = e
+                msg = str(e)
+                if "RESOURCE_EXHAUSTED" in msg or "429" in msg or "NOT_FOUND" in msg or "404" in msg:
+                    break  # quota hit or model unavailable — try the next model in the chain
+                raise  # some other client error (bad request, auth, etc.) — don't mask real bugs
+    raise last_error
 
 
 def embed_text(text: str) -> list[float]:
     """Turn a chunk of text (or a user question) into a 768-dim vector.
-    gemini-embedding-001 returns 3072 dims by default; output_dimensionality
-    truncates it to 768 to match the pgvector column (chunks.embedding VECTOR(768))."""
+    gemini-embedding-001 returns 3072 dims by default, so we truncate to 768
+    to match the pgvector column (see chunks.embedding VECTOR(768) in db/init.sql)."""
     result = client.models.embed_content(
         model=EMBED_MODEL,
         contents=text,
         config=types.EmbedContentConfig(output_dimensionality=768),
     )
     return result.embeddings[0].values
+
+
+def ocr_page_image(image_bytes: bytes) -> str:
+    """Transcribe a single rendered PDF page image using Gemini's vision input.
+    Used as a fallback when pypdf finds no extractable text layer (i.e. the
+    PDF is scanned/image-based rather than text-based)."""
+    response = _generate_with_fallback(
+        contents=[
+            types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+            "Transcribe all readable text from this document page, in reading order. "
+            "Return only the transcribed text, no commentary.",
+        ]
+    )
+    return response.text or ""
 
 
 def generate_answer(question: str, context_chunks: list[str], history: list[dict]) -> str:
@@ -40,17 +101,16 @@ def generate_answer(question: str, context_chunks: list[str], history: list[dict
         "You are OpsMind, an internal assistant for a support/operations team. "
         "Answer using ONLY the provided context (SOPs, logs, incident reports, API docs). "
         "If the context doesn't contain the answer, say so explicitly instead of guessing. "
-        "When relevant, cite which document the information came from. "
+        "Do NOT preface your answer with phrases like 'Based on the document X' or "
+        "'According to [filename]' — the source is already shown separately in the UI below "
+        "your answer, so just answer the question directly, as if you already know it. "
         "Format for a chat bubble: use bold for emphasis and short bullet lists where helpful, "
         "but avoid headers (###) and deep nesting — keep it scannable, not document-styled."
     )
 
-    # TODO (Day 5): fold `history` into the prompt or into a multi-turn chat session
-    # so follow-up questions like "what about the retry logic?" resolve correctly.
     prompt = f"Context:\n{context_block}\n\nQuestion: {question}"
 
-    response = client.models.generate_content(
-        model=CHAT_MODEL,
+    response = _generate_with_fallback(
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system_instruction),
     )

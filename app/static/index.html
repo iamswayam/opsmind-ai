@@ -121,6 +121,15 @@
     color: var(--accent);
     text-transform: uppercase;
   }
+  .doc-item .delete-icon {
+    color: var(--danger);
+    cursor: pointer;
+    opacity: 0.55;
+    padding: 2px;
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+  .doc-item .delete-icon:hover { opacity: 1; }
   .empty-state {
     font-size: 12px;
     color: #5C6472;
@@ -248,17 +257,6 @@
   }
   .bubble hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 
-  .sources {
-    margin-top: 7px;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--accent);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .sources::before { content: "sourced:"; color: #5C6472; }
-
   .typing { display: flex; gap: 4px; padding: 4px 0; }
   .typing span {
     width: 5px; height: 5px; border-radius: 50%;
@@ -329,6 +327,138 @@
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(-6px); }
   .toast.error { border-color: var(--danger); color: #F0A48F; }
 
+  .attach-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .attach-chip {
+    background: var(--accent-dim);
+    color: #FBEFD9;
+    font-size: 11.5px;
+    font-family: var(--mono);
+    padding: 5px 8px 5px 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .attach-chip .remove { cursor: pointer; opacity: 0.75; }
+  .attach-chip .remove:hover { opacity: 1; }
+
+  .composer-row { position: relative; }
+  .attach-btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    font-size: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .attach-btn:hover { border-color: var(--accent); }
+  .attach-dropup {
+    position: absolute;
+    bottom: 54px;
+    left: 6px;
+    width: 260px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    display: none;
+    z-index: 10;
+  }
+  .attach-dropup.open { display: block; }
+  .attach-dropup-label {
+    padding: 6px 8px;
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .attach-option {
+    padding: 8px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .attach-option:hover { background: var(--surface-2); }
+  .attach-option.selected { color: var(--text); }
+  .attach-option .check { color: var(--grounded); width: 14px; flex-shrink: 0; }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px;
+    width: 320px;
+  }
+  .modal-card h3 { font-size: 14px; margin: 0 0 8px; color: var(--text); }
+  .modal-card p { font-size: 12.5px; color: var(--text-dim); margin: 0 0 18px; line-height: 1.5; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-btn {
+    padding: 8px 14px;
+    border-radius: 7px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .modal-btn.danger { background: var(--danger); color: #2A130B; border: none; font-weight: 600; }
+
+  .sources { cursor: pointer; }
+  .sources-wrap {
+    margin-top: 7px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 10.5px;
+  }
+  .sources-wrap::before { content: "sourced:"; color: #5C6472; }
+  .source-tag {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .source-tag:hover { color: #F0B355; }
+  .source-detail {
+    margin-top: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    display: none;
+  }
+  .source-detail.open { display: block; }
+  .source-detail hr { border: none; border-top: 1px dashed var(--border); margin: 8px 0; }
+
   ::-webkit-scrollbar { width: 8px; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 </style>
@@ -380,20 +510,31 @@
     </div>
 
     <div class="composer">
-      <div class="composer-inner">
-        <textarea id="input" placeholder="Ask a question about your uploaded docs…" rows="1"></textarea>
-        <button class="send" id="sendBtn">SEND</button>
+      <div class="attach-row" id="attachRow"></div>
+      <div class="composer-row">
+        <div class="composer-inner">
+          <button class="attach-btn" id="attachBtn" aria-label="Attach a document" type="button">+</button>
+          <textarea id="input" placeholder="Ask a question about your uploaded docs…" rows="1"></textarea>
+          <button class="send" id="sendBtn">SEND</button>
+        </div>
+        <div class="attach-dropup" id="attachDropup">
+          <div class="attach-dropup-label">Attach a document</div>
+          <div id="attachOptions"></div>
+        </div>
       </div>
     </div>
   </main>
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="modalRoot"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <script>
 const API = ''; // same origin — served by FastAPI
 let conversationId = null;
+let allDocuments = [];       // cached list from /documents
+let attachedDocIds = [];     // currently attached doc ids for scoped chat
 
 const messagesEl = document.getElementById('messages');
 const welcomeEl = document.getElementById('welcome');
@@ -404,6 +545,11 @@ const toastEl = document.getElementById('toast');
 const uploadZone = document.getElementById('uploadZone');
 const fileInput = document.getElementById('fileInput');
 const docType = document.getElementById('docType');
+const attachBtn = document.getElementById('attachBtn');
+const attachDropup = document.getElementById('attachDropup');
+const attachOptions = document.getElementById('attachOptions');
+const attachRow = document.getElementById('attachRow');
+const modalRoot = document.getElementById('modalRoot');
 
 function toast(msg, isError = false) {
   toastEl.textContent = msg;
@@ -430,15 +576,85 @@ document.querySelectorAll('.chip').forEach(chip => {
 });
 sendBtn.addEventListener('click', sendMessage);
 
+// ---------- Attach flow ----------
+attachBtn.addEventListener('click', () => {
+  renderAttachOptions();
+  attachDropup.classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  if (!attachDropup.contains(e.target) && e.target !== attachBtn) {
+    attachDropup.classList.remove('open');
+  }
+});
+
+function renderAttachOptions() {
+  if (!allDocuments.length) {
+    attachOptions.innerHTML = '<div class="attach-option" style="cursor:default">No documents uploaded yet</div>';
+    return;
+  }
+  attachOptions.innerHTML = allDocuments.map(d => {
+    const selected = attachedDocIds.includes(d.id);
+    return `
+      <div class="attach-option ${selected ? 'selected' : ''}" data-id="${d.id}">
+        <span class="check">${selected ? '✓' : ''}</span>${d.filename}
+      </div>
+    `;
+  }).join('');
+  attachOptions.querySelectorAll('.attach-option[data-id]').forEach(el => {
+    el.addEventListener('click', () => toggleAttach(parseInt(el.dataset.id)));
+  });
+}
+
+function toggleAttach(docId) {
+  if (attachedDocIds.includes(docId)) {
+    attachedDocIds = attachedDocIds.filter(id => id !== docId);
+  } else {
+    attachedDocIds.push(docId);
+  }
+  renderAttachChips();
+  renderAttachOptions();
+}
+
+function renderAttachChips() {
+  attachRow.innerHTML = attachedDocIds.map(id => {
+    const doc = allDocuments.find(d => d.id === id);
+    if (!doc) return '';
+    return `
+      <div class="attach-chip">
+        ${doc.filename}
+        <span class="remove" data-id="${id}">✕</span>
+      </div>
+    `;
+  }).join('');
+  attachRow.querySelectorAll('.remove').forEach(el => {
+    el.addEventListener('click', () => toggleAttach(parseInt(el.dataset.id)));
+  });
+}
+
 function addMessage(role, text, sources) {
   welcomeEl.style.display = 'none';
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
   const roleLabel = role === 'user' ? 'You' : 'OpsMind';
+
+  // group multiple retrieved chunks from the same file under one tag,
+  // instead of showing the filename once per chunk
+  const grouped = {};
+  (sources || []).forEach(s => {
+    if (!grouped[s.filename]) grouped[s.filename] = [];
+    grouped[s.filename].push(s.snippet);
+  });
+  const filenames = Object.keys(grouped);
+
+  const sourcesHtml = filenames.length
+    ? `<div class="sources-wrap">${filenames.map((fn, i) => `<span class="source-tag" data-idx="${i}">${fn}</span>`).join('')}</div>
+       ${filenames.map((fn, i) => `<div class="source-detail" data-idx="${i}">${grouped[fn].join('<hr>')}</div>`).join('')}`
+    : '';
+
   msg.innerHTML = `
     <div class="role">${roleLabel}</div>
     <div class="bubble"></div>
-    ${sources && sources.length ? `<div class="sources">${sources.join(', ')}</div>` : ''}
+    ${sourcesHtml}
   `;
   const bubbleEl = msg.querySelector('.bubble');
   if (role === 'assistant') {
@@ -446,6 +662,14 @@ function addMessage(role, text, sources) {
   } else {
     bubbleEl.textContent = text;
   }
+
+  msg.querySelectorAll('.source-tag').forEach(el => {
+    el.addEventListener('click', () => {
+      const detail = msg.querySelector(`.source-detail[data-idx="${el.dataset.idx}"]`);
+      detail?.classList.toggle('open');
+    });
+  });
+
   messagesEl.appendChild(msg);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return msg;
@@ -478,7 +702,11 @@ async function sendMessage() {
     const res = await fetch(`${API}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, conversation_id: conversationId })
+      body: JSON.stringify({
+        question,
+        conversation_id: conversationId,
+        document_ids: attachedDocIds.length ? attachedDocIds : null
+      })
     });
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
@@ -527,23 +755,64 @@ async function uploadFile(file) {
   }
 }
 
+function showDeleteModal(doc) {
+  modalRoot.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-card">
+        <h3>Delete this document?</h3>
+        <p>${doc.filename} and its indexed chunks will be permanently removed. This can't be undone.</p>
+        <div class="modal-actions">
+          <button class="modal-btn" id="modalCancel">Cancel</button>
+          <button class="modal-btn danger" id="modalConfirm">Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalCancel').addEventListener('click', () => modalRoot.innerHTML = '');
+  document.getElementById('modalConfirm').addEventListener('click', () => deleteDocument(doc.id));
+}
+
+async function deleteDocument(docId) {
+  try {
+    const res = await fetch(`${API}/documents/${docId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+    modalRoot.innerHTML = '';
+    // if the deleted doc was attached in the composer, detach it —
+    // otherwise chat would silently filter by a document_id that no longer exists
+    attachedDocIds = attachedDocIds.filter(id => id !== docId);
+    renderAttachChips();
+    toast('Document deleted');
+    loadDocuments();
+  } catch (err) {
+    toast('Failed to delete document', true);
+    console.error(err);
+  }
+}
+
 async function loadDocuments() {
   try {
-    const res = await fetch(`${API}/documents`);
-    const docs = await res.json();
-    if (!docs.length) {
+    const res = await fetch(`${API}/documents`, { cache: 'no-store' });
+    allDocuments = await res.json();
+    if (!allDocuments.length) {
       docListEl.innerHTML = '<li class="empty-state">Nothing uploaded yet</li>';
       return;
     }
-    docListEl.innerHTML = docs.map(d => `
+    docListEl.innerHTML = allDocuments.map(d => `
       <li class="doc-item">
         <span class="dot">●</span>
-        <div>
+        <div style="flex:1">
           <div class="name">${d.filename}</div>
           <div class="type">${d.doc_type}</div>
         </div>
+        <i class="delete-icon" data-id="${d.id}" title="Delete">✕</i>
       </li>
     `).join('');
+    docListEl.querySelectorAll('.delete-icon').forEach(el => {
+      el.addEventListener('click', () => {
+        const doc = allDocuments.find(d => d.id === parseInt(el.dataset.id));
+        if (doc) showDeleteModal(doc);
+      });
+    });
   } catch (err) {
     console.error('Failed to load documents', err);
   }
