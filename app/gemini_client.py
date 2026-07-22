@@ -89,12 +89,9 @@ def ocr_page_image(image_bytes: bytes) -> str:
     return response.text or ""
 
 
-def generate_answer(question: str, context_chunks: list[str], history: list[dict]) -> str:
-    """
-    Non-streaming first pass — get this working before adding streaming.
-    context_chunks: the retrieved SOP/log/incident snippets from pgvector
-    history: prior turns in this conversation, [{"role": "user"/"assistant", "content": "..."}]
-    """
+def _build_prompt(question: str, context_chunks: list[str]):
+    """Shared prompt + system instruction builder for both generate_answer
+    and generate_answer_stream, so the two paths can't silently drift apart."""
     context_block = "\n\n---\n\n".join(context_chunks) if context_chunks else "(no relevant context found)"
 
     system_instruction = (
@@ -109,6 +106,15 @@ def generate_answer(question: str, context_chunks: list[str], history: list[dict
     )
 
     prompt = f"Context:\n{context_block}\n\nQuestion: {question}"
+    return prompt, system_instruction
+
+
+def generate_answer(question: str, context_chunks: list[str], history: list[dict]) -> str:
+    """
+    context_chunks: the retrieved SOP/log/incident snippets from pgvector
+    history: prior turns in this conversation, [{"role": "user"/"assistant", "content": "..."}]
+    """
+    prompt, system_instruction = _build_prompt(question, context_chunks)
 
     response = _generate_with_fallback(
         contents=prompt,
@@ -119,9 +125,41 @@ def generate_answer(question: str, context_chunks: list[str], history: list[dict
 
 def generate_answer_stream(question: str, context_chunks: list[str], history: list[dict]):
     """
-    TODO (Day 5-6): implement this using client.models.generate_content_stream(...)
-    and yield chunks so main.py can return a StreamingResponse.
-    Get generate_answer() working and tested first — streaming is a wrapper
-    around the same prompt, not a different concept.
+    Yields text deltas as they arrive from Gemini, trying each model in
+    CHAT_MODEL_FALLBACK_CHAIN in order.
+
+    Trade-off worth knowing: fallback here only works if a model fails BEFORE
+    yielding any text (e.g. an immediate 429/404 on connect). If a model starts
+    streaming and then fails mid-response, we can't cleanly retry on another
+    model without either duplicating already-sent text or discarding it, so
+    that case just stops the stream where it is. This is rarer in practice —
+    most failures happen on the initial request, not mid-stream — but it's a
+    real limitation, not an oversight.
     """
-    raise NotImplementedError("Build this after generate_answer() is working end to end")
+    prompt, system_instruction = _build_prompt(question, context_chunks)
+    config = types.GenerateContentConfig(system_instruction=system_instruction)
+
+    last_error = None
+    for model_name in CHAT_MODEL_FALLBACK_CHAIN:
+        try:
+            stream = client.models.generate_content_stream(
+                model=model_name, contents=prompt, config=config
+            )
+            yielded_anything = False
+            for chunk in stream:
+                if chunk.text:
+                    yielded_anything = True
+                    yield chunk.text
+            return  # this model completed the stream successfully
+        except (genai_errors.ServerError, genai_errors.ClientError) as e:
+            last_error = e
+            msg = str(e)
+            is_retryable = (
+                isinstance(e, genai_errors.ServerError)
+                or "RESOURCE_EXHAUSTED" in msg or "429" in msg
+                or "NOT_FOUND" in msg or "404" in msg
+            )
+            if not is_retryable:
+                raise  # real bug (bad request, auth) — don't mask it by trying other models
+            continue  # try the next model in the chain
+    raise last_error

@@ -458,6 +458,13 @@
   }
   .source-detail.open { display: block; }
   .source-detail hr { border: none; border-top: 1px dashed var(--border); margin: 8px 0; }
+  .snippet-page {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
 
   ::-webkit-scrollbar { width: 8px; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -631,30 +638,41 @@ function renderAttachChips() {
   });
 }
 
+function buildSourcesHtml(sources) {
+  // group multiple retrieved chunks from the same file under one tag,
+  // instead of showing the filename once per chunk
+  const grouped = {};
+  (sources || []).forEach(s => {
+    if (!grouped[s.filename]) grouped[s.filename] = [];
+    const label = s.page ? `<div class="snippet-page">Page ${s.page}</div>` : '';
+    grouped[s.filename].push(`${label}${s.snippet}`);
+  });
+  const filenames = Object.keys(grouped);
+  if (!filenames.length) return '';
+
+  return `<div class="sources-wrap">${filenames.map((fn, i) => `<span class="source-tag" data-idx="${i}">${fn}</span>`).join('')}</div>
+     ${filenames.map((fn, i) => `<div class="source-detail" data-idx="${i}">${grouped[fn].join('<hr>')}</div>`).join('')}`;
+}
+
+function wireSourceClicks(msgEl) {
+  msgEl.querySelectorAll('.source-tag').forEach(el => {
+    el.addEventListener('click', () => {
+      const detail = msgEl.querySelector(`.source-detail[data-idx="${el.dataset.idx}"]`);
+      detail?.classList.toggle('open');
+    });
+  });
+}
+
 function addMessage(role, text, sources) {
   welcomeEl.style.display = 'none';
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
   const roleLabel = role === 'user' ? 'You' : 'OpsMind';
 
-  // group multiple retrieved chunks from the same file under one tag,
-  // instead of showing the filename once per chunk
-  const grouped = {};
-  (sources || []).forEach(s => {
-    if (!grouped[s.filename]) grouped[s.filename] = [];
-    grouped[s.filename].push(s.snippet);
-  });
-  const filenames = Object.keys(grouped);
-
-  const sourcesHtml = filenames.length
-    ? `<div class="sources-wrap">${filenames.map((fn, i) => `<span class="source-tag" data-idx="${i}">${fn}</span>`).join('')}</div>
-       ${filenames.map((fn, i) => `<div class="source-detail" data-idx="${i}">${grouped[fn].join('<hr>')}</div>`).join('')}`
-    : '';
-
   msg.innerHTML = `
     <div class="role">${roleLabel}</div>
     <div class="bubble"></div>
-    ${sourcesHtml}
+    ${buildSourcesHtml(sources)}
   `;
   const bubbleEl = msg.querySelector('.bubble');
   if (role === 'assistant') {
@@ -663,29 +681,23 @@ function addMessage(role, text, sources) {
     bubbleEl.textContent = text;
   }
 
-  msg.querySelectorAll('.source-tag').forEach(el => {
-    el.addEventListener('click', () => {
-      const detail = msg.querySelector(`.source-detail[data-idx="${el.dataset.idx}"]`);
-      detail?.classList.toggle('open');
-    });
-  });
-
+  wireSourceClicks(msg);
   messagesEl.appendChild(msg);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return msg;
 }
 
-function addTyping() {
+function createStreamingAssistantMessage() {
   welcomeEl.style.display = 'none';
   const msg = document.createElement('div');
   msg.className = 'msg assistant';
-  msg.id = 'typingIndicator';
-  msg.innerHTML = `<div class="role">OpsMind</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  msg.innerHTML = `
+    <div class="role">OpsMind</div>
+    <div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>
+  `;
   messagesEl.appendChild(msg);
   messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-function removeTyping() {
-  document.getElementById('typingIndicator')?.remove();
+  return { msgEl: msg, bubbleEl: msg.querySelector('.bubble') };
 }
 
 async function sendMessage() {
@@ -696,10 +708,13 @@ async function sendMessage() {
   sendBtn.disabled = true;
 
   addMessage('user', question);
-  addTyping();
+  const { msgEl, bubbleEl } = createStreamingAssistantMessage();
+
+  let accumulated = '';
+  let firstChunkReceived = false;
 
   try {
-    const res = await fetch(`${API}/chat`, {
+    const res = await fetch(`${API}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -708,15 +723,44 @@ async function sendMessage() {
         document_ids: attachedDocIds.length ? attachedDocIds : null
       })
     });
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    const data = await res.json();
-    conversationId = data.conversation_id;
-    document.getElementById('convTitle').textContent = question.slice(0, 50);
-    removeTyping();
-    addMessage('assistant', data.answer, data.sources);
+    if (!res.ok || !res.body) throw new Error(`Server returned ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const events = buffer.split('\n\n');
+      buffer = events.pop(); // last (possibly incomplete) event stays buffered
+
+      for (const raw of events) {
+        if (!raw.startsWith('data: ')) continue;
+        const payload = JSON.parse(raw.slice(6));
+
+        if (payload.type === 'chunk') {
+          if (!firstChunkReceived) {
+            firstChunkReceived = true;
+            bubbleEl.innerHTML = ''; // clear the typing dots on first real content
+          }
+          accumulated += payload.text;
+          bubbleEl.innerHTML = marked.parse(accumulated);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else if (payload.type === 'done') {
+          conversationId = payload.conversation_id;
+          document.getElementById('convTitle').textContent = question.slice(0, 50);
+          const sourcesEl = document.createElement('div');
+          sourcesEl.innerHTML = buildSourcesHtml(payload.sources);
+          while (sourcesEl.firstChild) msgEl.appendChild(sourcesEl.firstChild);
+          wireSourceClicks(msgEl);
+        }
+      }
+    }
   } catch (err) {
-    removeTyping();
-    addMessage('assistant', "Couldn't reach the backend. Check that the API container is running.");
+    bubbleEl.innerHTML = marked.parse("Couldn't reach the backend. Check that the API container is running.");
     toast('Request failed — see console', true);
     console.error(err);
   } finally {
