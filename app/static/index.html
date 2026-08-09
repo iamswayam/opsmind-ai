@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
+<!-- saved from url=(0022)http://127.0.0.1:8000/ -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpsMind AI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,6 +18,7 @@
     --accent-dim: #7A5A26;
     --grounded: #4FA8A0;
     --danger: #D9694F;
+    --cmd-blue: #5B9BFF;
     --mono: 'JetBrains Mono', monospace;
     --sans: 'Inter', sans-serif;
   }
@@ -257,6 +258,52 @@
   }
   .bubble hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 
+  .mermaid-diagram {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin: 8px 0;
+    overflow-x: auto;
+  }
+  /* deliberately no max-width/height:auto here — that would shrink the
+     adaptively-sized SVG back down to fit the bubble, undoing the sizing
+     logic in renderMermaidBlocks. Horizontal scroll (above) is the safety
+     net for any diagram that's still wider than DIAGRAM_TARGET_WIDTH. */
+
+  .msg.has-diagram { max-width: 92%; }
+
+  .diagram-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .diagram-tool-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .diagram-tool-btn:hover { border-color: var(--accent); }
+
+  .diagram-action-btn {
+    display: block;
+    margin-top: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .diagram-action-btn:hover { border-color: var(--accent); }
+
   .typing { display: flex; gap: 4px; padding: 4px 0; }
   .typing span {
     width: 5px; height: 5px; border-radius: 50%;
@@ -397,6 +444,82 @@
   .attach-option.selected { color: var(--text); }
   .attach-option .check { color: var(--grounded); width: 14px; flex-shrink: 0; }
 
+  /* --- @ command highlighting + autocomplete (req 6/7) --- */
+  .input-wrap {
+    position: relative;
+    flex: 1;
+  }
+  .input-highlight,
+  #input {
+    /* these two layers must match EXACTLY (font, padding, line-height) or the
+       colored text underneath won't align with the invisible typed text on top */
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.4;
+    padding: 8px 0;
+    box-sizing: border-box;
+  }
+  .input-highlight {
+    position: absolute;
+    inset: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow: hidden;
+    pointer-events: none;
+    color: var(--text);
+  }
+  .input-highlight .cmd-token {
+    color: var(--cmd-blue);
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+  #input {
+    position: relative;
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: transparent;       /* real glyphs come from .input-highlight beneath */
+    caret-color: var(--text);
+    resize: none;
+    max-height: 120px;
+  }
+  #input::placeholder { color: #5C6472; }
+
+  .command-dropup {
+    position: absolute;
+    bottom: 54px;
+    left: 6px;
+    width: 280px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    display: none;
+    z-index: 11;
+  }
+  .command-dropup.open { display: block; }
+  .command-item {
+    padding: 8px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .command-item:hover, .command-item.active { background: var(--surface-2); }
+  .command-item .cmd-name {
+    color: var(--cmd-blue);
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 12.5px;
+  }
+  .command-item .cmd-desc {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+
   .modal-overlay {
     position: fixed;
     inset: 0;
@@ -465,6 +588,18 @@
     text-transform: uppercase;
     margin-bottom: 4px;
   }
+  .snippet-thumb {
+    display: block;
+    max-width: 100%;
+    max-height: 180px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin-bottom: 6px;
+  }
+  .snippet-caption {
+    font-style: italic;
+    color: var(--text-dim);
+  }
 
   ::-webkit-scrollbar { width: 8px; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -478,9 +613,9 @@
     <div class="brand-sub">Grounded answers from your ops docs</div>
 
     <div class="upload-zone" id="uploadZone">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.6"><path d="M12 3v12m0-12 4 4m-4-4-4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.6"><path d="M12 3v12m0-12 4 4m-4-4-4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>
       <p>Drop a file or click to upload</p>
-      <p class="hint">PDF, TXT, LOG</p>
+      <p class="hint">PDF, DOCX, TXT, LOG</p>
     </div>
     <select class="doc-type" id="docType">
       <option value="sop">SOP</option>
@@ -489,11 +624,18 @@
       <option value="api_doc">API doc</option>
       <option value="incident">Incident report</option>
     </select>
-    <input type="file" id="fileInput" accept=".pdf,.txt,.log">
+    <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.log">
 
     <div class="section-label">Documents</div>
     <ul class="doc-list" id="docList">
-      <li class="empty-state">Nothing uploaded yet</li>
+      <li class="doc-item">
+        <span class="dot">●</span>
+        <div style="flex:1">
+          <div class="name">EZ_Auto_Backend_AI_Interview_Preparation_FINAL.docx</div>
+          <div class="type">sop</div>
+        </div>
+        <i class="delete-icon" data-id="51" title="Delete">✕</i>
+      </li>
     </ul>
   </aside>
 
@@ -512,6 +654,8 @@
           <div class="chip" data-q="Why did this fail?">Why did this fail?</div>
           <div class="chip" data-q="Show the relevant SOP.">Show the relevant SOP</div>
           <div class="chip" data-q="Summarize this incident.">Summarize this incident</div>
+          <div class="chip" data-q="@doc brief me about this project">@doc exact answer</div>
+          <div class="chip" data-q="@art architecture overview">@art diagram</div>
         </div>
       </div>
     </div>
@@ -521,13 +665,17 @@
       <div class="composer-row">
         <div class="composer-inner">
           <button class="attach-btn" id="attachBtn" aria-label="Attach a document" type="button">+</button>
-          <textarea id="input" placeholder="Ask a question about your uploaded docs…" rows="1"></textarea>
+          <div class="input-wrap">
+            <div class="input-highlight" id="inputHighlight" aria-hidden="true"></div>
+            <textarea id="input" placeholder="Ask a question, or try @doc / @art…" rows="1"></textarea>
+          </div>
           <button class="send" id="sendBtn">SEND</button>
         </div>
         <div class="attach-dropup" id="attachDropup">
           <div class="attach-dropup-label">Attach a document</div>
           <div id="attachOptions"></div>
         </div>
+        <div class="command-dropup" id="commandDropup"></div>
       </div>
     </div>
   </main>
@@ -537,11 +685,15 @@
 <div id="modalRoot"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
 const API = ''; // same origin — served by FastAPI
 let conversationId = null;
 let allDocuments = [];       // cached list from /documents
 let attachedDocIds = [];     // currently attached doc ids for scoped chat
+let lastUserQuestion = '';   // used by the "Create diagram" quick-action button
+
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose', flowchart: { useMaxWidth: false } });
 
 const messagesEl = document.getElementById('messages');
 const welcomeEl = document.getElementById('welcome');
@@ -557,6 +709,79 @@ const attachDropup = document.getElementById('attachDropup');
 const attachOptions = document.getElementById('attachOptions');
 const attachRow = document.getElementById('attachRow');
 const modalRoot = document.getElementById('modalRoot');
+const inputHighlightEl = document.getElementById('inputHighlight');
+const commandDropupEl = document.getElementById('commandDropup');
+
+// Extensible by design (req 6) — adding a future command is just adding an
+// entry here; nothing else needs to change to make it appear in suggestions
+// and get blue highlighting.
+const AVAILABLE_COMMANDS = [
+  { cmd: '@doc', desc: 'Exact answer from the selected document' },
+  { cmd: '@art', desc: 'Generate a diagram from the document' },
+];
+
+let activeCommandIndex = 0;
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function updateInputHighlight() {
+  const raw = inputEl.value;
+  const match = raw.match(/^(@doc|@art)\b/i);
+  let html;
+  if (match && AVAILABLE_COMMANDS.some(c => c.cmd.toLowerCase() === match[1].toLowerCase())) {
+    const cmdPart = raw.slice(0, match[1].length);
+    const restPart = raw.slice(match[1].length);
+    html = `<span class="cmd-token">${escapeHtml(cmdPart)}</span>${escapeHtml(restPart)}`;
+  } else {
+    html = escapeHtml(raw);
+  }
+  // browsers collapse a trailing newline visually unless something follows it —
+  // mirror that so the two layers stay aligned when the last line is empty
+  inputHighlightEl.innerHTML = html + (raw.endsWith('\n') ? ' ' : '');
+}
+
+function syncHighlightScroll() {
+  inputHighlightEl.scrollTop = inputEl.scrollTop;
+  inputHighlightEl.scrollLeft = inputEl.scrollLeft;
+}
+
+function updateCommandSuggestions() {
+  const match = inputEl.value.match(/^@(\w*)$/);
+  if (!match) {
+    commandDropupEl.classList.remove('open');
+    return;
+  }
+  const typed = match[1].toLowerCase();
+  const filtered = AVAILABLE_COMMANDS.filter(c => c.cmd.slice(1).toLowerCase().startsWith(typed));
+  if (!filtered.length) {
+    commandDropupEl.classList.remove('open');
+    return;
+  }
+  activeCommandIndex = Math.min(activeCommandIndex, filtered.length - 1);
+  commandDropupEl.innerHTML = filtered.map((c, i) => `
+    <div class="command-item ${i === activeCommandIndex ? 'active' : ''}" data-cmd="${c.cmd}">
+      <span class="cmd-name">${c.cmd}</span>
+      <span class="cmd-desc">${c.desc}</span>
+    </div>
+  `).join('');
+  commandDropupEl.querySelectorAll('.command-item').forEach(el => {
+    el.addEventListener('click', () => selectCommand(el.dataset.cmd));
+  });
+  commandDropupEl.classList.add('open');
+  commandDropupEl._filtered = filtered; // stashed for keyboard nav
+}
+
+function selectCommand(cmd) {
+  inputEl.value = cmd + ' ';
+  commandDropupEl.classList.remove('open');
+  updateInputHighlight();
+  autoGrow();
+  inputEl.focus();
+}
 
 function toast(msg, isError = false) {
   toastEl.textContent = msg;
@@ -568,8 +793,40 @@ function autoGrow() {
   inputEl.style.height = 'auto';
   inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
 }
-inputEl.addEventListener('input', autoGrow);
+inputEl.addEventListener('input', () => {
+  autoGrow();
+  updateInputHighlight();
+  updateCommandSuggestions();
+});
+inputEl.addEventListener('scroll', syncHighlightScroll);
 inputEl.addEventListener('keydown', (e) => {
+  const isOpen = commandDropupEl.classList.contains('open');
+  const filtered = commandDropupEl._filtered || [];
+
+  if (isOpen && filtered.length) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeCommandIndex = (activeCommandIndex + 1) % filtered.length;
+      updateCommandSuggestions();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeCommandIndex = (activeCommandIndex - 1 + filtered.length) % filtered.length;
+      updateCommandSuggestions();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      selectCommand(filtered[activeCommandIndex].cmd);
+      return;
+    }
+    if (e.key === 'Escape') {
+      commandDropupEl.classList.remove('open');
+      return;
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
@@ -591,6 +848,9 @@ attachBtn.addEventListener('click', () => {
 document.addEventListener('click', (e) => {
   if (!attachDropup.contains(e.target) && e.target !== attachBtn) {
     attachDropup.classList.remove('open');
+  }
+  if (!commandDropupEl.contains(e.target) && e.target !== inputEl) {
+    commandDropupEl.classList.remove('open');
   }
 });
 
@@ -645,7 +905,14 @@ function buildSourcesHtml(sources) {
   (sources || []).forEach(s => {
     if (!grouped[s.filename]) grouped[s.filename] = [];
     const label = s.page ? `<div class="snippet-page">Page ${s.page}</div>` : '';
-    grouped[s.filename].push(`${label}${s.snippet}`);
+    if (s.modality === 'image' && s.image_base64) {
+      grouped[s.filename].push(
+        `${label}<img class="snippet-thumb" src="data:image/png;base64,${s.image_base64}" alt="Retrieved image, page ${s.page || '?'}">
+         <div class="snippet-caption">${s.snippet}</div>`
+      );
+    } else {
+      grouped[s.filename].push(`${label}${s.snippet}`);
+    }
   });
   const filenames = Object.keys(grouped);
   if (!filenames.length) return '';
@@ -663,6 +930,118 @@ function wireSourceClicks(msgEl) {
   });
 }
 
+// Diagram sizing is now ADAPTIVE, not a flat multiplier — a flat 2.5x made small
+// diagrams readable but turned already-wide ones into unmanageable horizontal
+// sprawl (increasing the scale alone doesn't fix a layout problem). Target a
+// max on-screen width and scale toward it: small/simple diagrams get scaled UP
+// for readability, large/complex ones are capped near their natural size instead
+// of being blown up further. The real fix for sprawl is the generation-side
+// layout constraints in gemini_client.py — this is a sizing safety net, not a
+// substitute for that.
+const DIAGRAM_TARGET_WIDTH = 1100;
+const DIAGRAM_MIN_SCALE = 1;
+const DIAGRAM_MAX_SCALE = 1.8;
+
+function svgToBlobUrl(svgEl) {
+  const svgData = new XMLSerializer().serializeToString(svgEl);
+  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  return URL.createObjectURL(blob);
+}
+
+function openDiagramFullSize(svgEl) {
+  window.open(svgToBlobUrl(svgEl), '_blank');
+}
+
+function downloadDiagramAsPng(svgEl, filename) {
+  // Right-clicking an inline <svg> only offers "Save Page As" (HTML), never
+  // "Save Image As" — browsers don't treat inline SVG as a standalone image
+  // resource. Converting to PNG via canvas is the only reliable way to give
+  // the user an actual, real image file to save.
+  const url = svgToBlobUrl(svgEl);
+  const img = new Image();
+  img.onload = () => {
+    const exportScale = 2; // extra crispness on top of whatever on-screen scale was applied
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width * exportScale;
+    canvas.height = img.height * exportScale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#14181D'; // match the app background so transparent areas aren't white
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob((blob) => {
+      const pngUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = pngUrl;
+      a.download = filename || 'opsmind-diagram.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(pngUrl);
+    }, 'image/png');
+  };
+  img.src = url;
+}
+
+async function renderMermaidBlocks(container) {
+  const blocks = container.querySelectorAll('code.language-mermaid');
+  for (const block of blocks) {
+    const code = block.textContent;
+    const id = 'mermaid-' + Math.random().toString(36).slice(2);
+    try {
+      const { svg } = await mermaid.render(id, code);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'mermaid-diagram';
+      wrapper.innerHTML = svg;
+
+      const svgEl = wrapper.querySelector('svg');
+      if (svgEl) {
+        const w = parseFloat(svgEl.getAttribute('width')) || svgEl.viewBox.baseVal.width;
+        const h = parseFloat(svgEl.getAttribute('height')) || svgEl.viewBox.baseVal.height;
+        if (w && h) {
+          let scale = DIAGRAM_TARGET_WIDTH / w;
+          scale = Math.max(DIAGRAM_MIN_SCALE, Math.min(DIAGRAM_MAX_SCALE, scale));
+          svgEl.setAttribute('width', w * scale);
+          svgEl.setAttribute('height', h * scale);
+        }
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'diagram-toolbar';
+        toolbar.innerHTML = `
+          <button class="diagram-tool-btn" type="button">Open full size &#x26F6;</button>
+
+          <button class="diagram-tool-btn" type="button">Download PNG &#x2B07;</button>
+        `;
+        const [openBtn, downloadBtn] = toolbar.querySelectorAll('.diagram-tool-btn');
+        openBtn.addEventListener('click', () => openDiagramFullSize(svgEl));
+        downloadBtn.addEventListener('click', () => downloadDiagramAsPng(svgEl, 'opsmind-diagram.png'));
+        wrapper.appendChild(toolbar);
+      }
+
+      const pre = block.closest('pre');
+      if (pre) {
+        pre.replaceWith(wrapper);
+        // diagrams need more room than the normal 72%-width chat bubble allows
+        const msgEl = wrapper.closest('.msg');
+        if (msgEl) msgEl.classList.add('has-diagram');
+      }
+    } catch (err) {
+      console.error('Mermaid render failed, leaving raw code visible', err);
+    }
+  }
+}
+
+function addCreateDiagramButton(msgEl, question) {
+  const btn = document.createElement('button');
+  btn.className = 'diagram-action-btn';
+  btn.textContent = '\u{1F4CA} Create diagram';
+  btn.addEventListener('click', () => {
+    inputEl.value = `@art ${question}`;
+    sendMessage();
+  });
+  msgEl.appendChild(btn);
+}
+
 function addMessage(role, text, sources) {
   welcomeEl.style.display = 'none';
   const msg = document.createElement('div');
@@ -677,6 +1056,10 @@ function addMessage(role, text, sources) {
   const bubbleEl = msg.querySelector('.bubble');
   if (role === 'assistant') {
     bubbleEl.innerHTML = marked.parse(text);
+    renderMermaidBlocks(bubbleEl);
+    if (!text.includes('```mermaid') && lastUserQuestion) {
+      addCreateDiagramButton(msg, lastUserQuestion);
+    }
   } else {
     bubbleEl.textContent = text;
   }
@@ -705,7 +1088,13 @@ async function sendMessage() {
   if (!question) return;
   inputEl.value = '';
   autoGrow();
+  updateInputHighlight();
+  commandDropupEl.classList.remove('open');
   sendBtn.disabled = true;
+
+  // strip any @doc/@art prefix so the "Create diagram" button always builds
+  // a clean "@art <topic>" follow-up, regardless of which mode was used
+  lastUserQuestion = question.replace(/^@(doc|art)\s*/i, '').trim();
 
   addMessage('user', question);
   const { msgEl, bubbleEl } = createStreamingAssistantMessage();
@@ -756,6 +1145,10 @@ async function sendMessage() {
           sourcesEl.innerHTML = buildSourcesHtml(payload.sources);
           while (sourcesEl.firstChild) msgEl.appendChild(sourcesEl.firstChild);
           wireSourceClicks(msgEl);
+          renderMermaidBlocks(bubbleEl);
+          if (!accumulated.includes('```mermaid') && lastUserQuestion) {
+            addCreateDiagramButton(msgEl, lastUserQuestion);
+          }
         }
       }
     }
@@ -864,5 +1257,6 @@ async function loadDocuments() {
 
 loadDocuments();
 </script>
-</body>
-</html>
+
+
+</body></html>

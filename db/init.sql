@@ -12,14 +12,19 @@ CREATE TABLE documents (
 );
 
 -- Chunked + embedded content. This is what similarity search runs against.
--- Gemini's text-embedding-004 model outputs 768-dim vectors.
+-- Both text and image chunks live in this table, sharing ONE vector space
+-- via gemini-embedding-2 (Google's multimodal embedding model) — that's
+-- what makes cross-modal retrieval possible: a text question's embedding
+-- can be genuinely close to an image's embedding, not just to other text.
 CREATE TABLE chunks (
     id           SERIAL PRIMARY KEY,
     document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    content      TEXT NOT NULL,
+    content      TEXT NOT NULL,        -- chunk text, OR an image's generated caption
     embedding    VECTOR(768) NOT NULL,
     chunk_index  INTEGER NOT NULL,       -- position within the source doc, useful for context ordering
-    metadata     JSONB DEFAULT '{}'      -- e.g. {"page": 3, "section": "Rollback steps"}
+    metadata     JSONB DEFAULT '{}',    -- e.g. {"page": 3, "section": "Rollback steps"}
+    modality     TEXT NOT NULL DEFAULT 'text',  -- 'text' | 'image'
+    image_data   BYTEA                  -- raw image bytes, only set when modality = 'image'
 );
 
 -- IVFFlat index for fast approximate nearest-neighbor search.
