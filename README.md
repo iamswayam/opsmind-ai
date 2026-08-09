@@ -1,177 +1,239 @@
 # OpsMind AI
 
-Internal copilot for support/ops teams: upload SOPs, PDFs, logs, and incident
-reports, then ask questions grounded in that content via RAG — "why did this
-fail," "show the relevant SOP," "summarize this incident" — with the answer
+An internal copilot for support/ops teams: upload SOPs, PDFs, DOCX files,
+logs, and incident reports, then get answers grounded in that content —
+"why did this fail," "show the relevant SOP," "summarize this incident" —
 backed by the actual uploaded documents, not the model's general knowledge.
 
-**Status:** working end to end, with a real UI. Upload, chunk, embed, store,
-retrieve, generate, and display all work — including document-scoped chat,
-a confidence gate that refuses to guess on weak retrieval, source
-transparency, document deletion, and automatic fallback across Gemini models
-when one is rate-limited. Streaming and the agentic decision layer are the
-next build phase.
+Built as a hands-on portfolio project to go beyond "RAG tutorial" territory:
+a real agentic decision layer (not just retrieve-then-generate), multimodal
+retrieval across text and images in one vector space, an exact-answer mode
+that guarantees verbatim source text instead of LLM paraphrasing, and a
+resilience layer that survives Gemini's free-tier quota and model-deprecation
+churn automatically. Every design decision below was made — and every bug
+was hit and fixed — while actually building it, not copied from a template.
+
+## What it does
+
+- **Ask normal questions** and get synthesized, grounded answers with
+  clickable sources (including page numbers and, for scanned/DOCX files,
+  reconstructed content)
+- **`@doc <question>`** — finds the closest matching answer already written
+  in your document and returns it **verbatim**, preserving the source's own
+  paragraph structure, instead of a generated summary
+- **`@art <topic>`** — generates an architecture/flow diagram grounded in
+  your documents, rendered as an actual interactive SVG (open full-size,
+  export as PNG)
+- **Upload images embedded in PDFs**, not just text — OpsMind embeds and
+  retrieves them in the *same* vector space as text, so a question can
+  surface a relevant diagram, not just a paragraph that mentions one
+- **Multi-step investigation** via a LangGraph agent that triages each
+  question and decides whether to answer directly, ask a clarifying
+  question, or work through a bounded diagnostic loop — the actual
+  difference between "a RAG demo" and something agentic
 
 ## Stack
 
-FastAPI · PostgreSQL + pgvector · Gemini API (embeddings + generation) · Docker
-· vanilla HTML/CSS/JS frontend (no framework — served directly by FastAPI)
+FastAPI · PostgreSQL + pgvector · Gemini API (`gemini-embedding-2` for
+multimodal embeddings, a fallback chain of chat models for generation) ·
+LangGraph · Docker · vanilla HTML/CSS/JS frontend (no framework, no build
+step, served directly by FastAPI)
 
 ## Run it
 
 1. Get a free Gemini API key at [aistudio.google.com](https://aistudio.google.com) — no card required.
 2. `cp .env.example .env` and paste your key into `GEMINI_API_KEY`.
 3. `docker compose up --build`
-4. Open **http://localhost:8000/** for the chat UI. Swagger docs are still at
-   **http://localhost:8000/docs** if you want to hit endpoints directly.
+4. Open **http://localhost:8000/** for the chat UI. Swagger docs are at
+   **http://localhost:8000/docs**, including `/chat/agent` (the LangGraph
+   endpoint), which isn't wired into the frontend yet.
+5. Run tests: `docker compose exec api pytest tests/ -v`
 
 ## Architecture
 
-**Upload path:** file → extract text (`pypdf` for text-layer PDFs, `PyMuPDF` +
-Gemini vision OCR as a fallback for scanned/image-based PDFs, plain text for
-logs/SOPs) → chunk (fixed-size, overlapping) → embed each chunk with Gemini →
-store in `chunks` (pgvector column) alongside the source document reference.
+**Ingestion:** file → extract per-page/section (`pypdf` for text-layer PDFs,
+`PyMuPDF` + Gemini vision OCR for scanned PDFs, `python-docx` for `.docx`
+with manual line-break preservation so ASCII diagrams in source documents
+survive extraction intact, plain text for logs/SOPs) → paragraph-aware
+chunking → each chunk embedded with `gemini-embedding-2` (Google's
+multimodal embedding model — text and images share one 768-dim vector
+space) → stored in `chunks`, tagged with page number and modality
+(`text`/`image`). PDFs also have their embedded images extracted directly
+(not just OCR'd), captioned, and embedded the same way — capped and
+size-filtered to protect free-tier quota.
 
-**Chat path:** question → optionally scoped to specific attached document(s)
-→ embed the question → cosine-similarity search against `chunks`
-(`ORDER BY embedding <=> question_embedding::vector`, filtered by
-`document_id` if docs are attached) → **confidence gate**: if even the best
-match is too dissimilar (cosine distance > `DISTANCE_THRESHOLD`), skip
-generation and say so honestly instead of letting the model guess → otherwise,
-top 5 matches + prior conversation history sent to Gemini → answer generated
-→ both turns persisted to `messages`, with retrieved snippets returned as
-clickable, expandable sources in the UI.
+**Normal chat (`/chat`, `/chat/stream`):** question → optionally scoped to
+attached document(s) → embed → cosine-similarity search → confidence gate
+(refuses to guess on weak retrieval) → top matches (text *and* image
+chunks) sent to Gemini, with retrieved images passed as actual image
+content, not just captions → answer streamed via SSE, sources shown with
+page numbers and image thumbnails.
 
-**Model resilience:** every Gemini call routes through a fallback chain
-(`CHAT_MODEL_FALLBACK_CHAIN` in `gemini_client.py`), ordered by actual daily
-quota headroom on the free tier. If one model is rate-limited (429) or
-unavailable (404), the next model in the chain is tried automatically instead
-of the request failing.
+**`@doc` exact-answer mode:** retrieves a *wide* candidate pool (not just
+the top match — a loosely-phrased question like "brief me about the whole
+project" often isn't closest-by-raw-cosine to the one section that actually
+answers it best), then one lightweight LLM call *selects* which candidate
+genuinely answers the question — it never generates the answer text itself.
+The selected section is reconstructed from real stored chunk text and
+trimmed to its actual heading-delimited boundaries (not a fixed-size
+window, which either truncates long answers or bleeds into the next
+section), so the response is guaranteed verbatim, starting at the real
+content — never the section heading, never a duplicate source snippet.
 
-## UI features
+**`@art` diagram mode:** retrieves context, then asks Gemini for Mermaid
+diagram syntax under explicit layout constraints (bounded siblings per
+rank, subgraph grouping, a node-count budget) — the fix for diagrams that
+otherwise sprawl horizontally is at the *generation* prompt, not just
+rendering. Rendered client-side as real SVG with adaptive sizing (scales
+small diagrams up for readability, never blows up an already-large one
+further), plus "open full size" and a real PNG export (canvas-based, since
+browsers don't offer "save as image" for inline SVGs).
 
-- **Document-scoped chat** — click `+` above the composer to attach one or
-  more specific documents; chat retrieval is then filtered to only those
-  docs' chunks, instead of searching everything (this is what fixes
-  cross-document confusion once you have more than one doc uploaded)
-- **Delete documents** — trash icon per document in the sidebar, with a
-  confirmation modal before deleting; cascades to the document's chunks
-  automatically (`ON DELETE CASCADE`) and auto-detaches it from chat if it
-  was currently attached
-- **Clickable sources** — each `sourced:` tag under an answer expands to show
-  the actual retrieved chunk text, so answers are verifiable, not just
-  trusted
-- **Markdown rendering** — assistant responses render bold/lists/etc.
-  properly via `marked.js` instead of showing raw `**`/`###` syntax
+**Agentic layer (`/chat/agent`, LangGraph):** a triage call classifies each
+question as `direct`, `clarify`, or `investigate`. Direct questions retrieve
+and answer like normal chat. Ambiguous questions get a clarifying question
+with zero retrieval spent. Diagnostic questions enter a bounded loop (max 3
+iterations, enforced in code, not just prompted for): each iteration picks
+one relevant diagnostic check from retrieved content, evaluates it, and
+records the result so later iterations don't re-derive the same partial
+conclusion — ending in a resolved answer, a request for specific missing
+evidence, or an escalation summarizing what was actually checked.
+
+**Model resilience:** every Gemini call (generation, streaming, structured
+JSON, OCR, image captioning) routes through a fallback chain ordered by
+real, verified daily quota headroom — confirmed directly against the
+AI Studio dashboard rather than trusted from inconsistent blog posts. On a
+429 (quota) or 404 (deprecated/unavailable), the next model is tried
+automatically; transient 5xx errors retry the *same* model first.
 
 ## Endpoints
 
 | Endpoint | Method | What it does |
 |---|---|---|
 | `/` | GET | Serves the chat UI |
-| `/documents/upload` | POST | Upload a file (`multipart/form-data`, fields: `file`, `doc_type`) — extracts (with OCR fallback), chunks, embeds, stores |
-| `/documents` | GET | List all uploaded documents |
-| `/documents/{id}` | DELETE | Delete a document and its chunks (cascades automatically) |
-| `/chat` | POST | `{"question": "...", "conversation_id": optional, "document_ids": optional}` — retrieves relevant context (optionally scoped) and returns a grounded answer with source snippets |
-| `/health` | GET | Basic liveness check |
+| `/documents/upload` | POST | Upload a file — extracts (with OCR/DOCX support), chunks per page/section, embeds text *and* images, stores |
+| `/documents` | GET | List uploaded documents |
+| `/documents/{id}` | DELETE | Delete a document and its chunks (cascades) |
+| `/chat` | POST | `{"question", "conversation_id"?, "document_ids"?}` — normal chat, `@doc`, and `@art` modes all route through here |
+| `/chat/stream` | POST | Same, streamed via Server-Sent Events |
+| `/chat/agent` | POST | Runs the LangGraph agent instead of the linear pipeline; response includes `intent` and `investigation_steps` |
+| `/health` | GET | Liveness check |
 
 ## Database schema
 
-- `documents` — one row per uploaded file (filename, doc_type, uploaded_at)
-- `chunks` — chunked content + `vector(768)` embedding + reference to source document (`ON DELETE CASCADE`)
-- `conversations` — one row per chat session
-- `messages` — full turn-by-turn history per conversation, so follow-up questions have context
+- `documents` — filename, doc_type, uploaded_at
+- `chunks` — content (text, or an image's caption) + `vector(768)` embedding
+  + `metadata` (page number) + `modality` (`text`/`image`) + `image_data`
+  (raw bytes, for image chunks) + reference to source document (cascades on delete)
+- `conversations` / `messages` — session and turn-by-turn history
 
-Full schema lives in `db/init.sql` and runs automatically on first container boot.
+Schema lives in `db/init.sql` (fresh installs); `db/migrations/` holds
+migrations for databases created before a given feature (e.g. multimodal
+columns) existed.
 
-## What's deliberately left for you to build (see TODOs in the code)
+## Project structure
 
-- **Streaming** (`generate_answer_stream` in `gemini_client.py`) — get the
-  non-streaming version working and tested first; streaming is the same prompt
-  wrapped differently, not a separate concept.
-- **Better chunking** (`chunking.py`) — naive fixed-size chunking works, but
-  compare it against paragraph/section-aware splitting once the pipeline runs.
-  This comparison is a genuinely good interview story.
-- **The agentic layer** — right now `/chat` always retrieves (when a doc is
-  relevant enough to pass the confidence gate). A LangGraph agent that
-  *decides* whether to retrieve, ask a clarifying question, or walk through a
-  troubleshooting flow step-by-step is the difference between "a RAG demo"
-  and "OpsMind." That's the next phase of this build.
-- **Auth, structured logging/evals dashboard** — add once the agentic layer works.
+```
+opsmind-ai/
+├── app/
+│   ├── main.py           # HTTP layer: chat/doc/art/agent endpoints, upload, extraction
+│   ├── agent.py           # LangGraph agentic layer: state, nodes, routing
+│   ├── retrieval.py        # shared retrieval helpers (used by main.py AND agent.py)
+│   ├── gemini_client.py    # all Gemini calls: embeddings, generation, streaming,
+│   │                       #   structured output, diagrams, OCR, the fallback chain
+│   ├── chunking.py         # paragraph-aware chunking
+│   ├── db.py               # connection handling, pgvector registration
+│   └── static/index.html   # single-file frontend
+├── tests/
+│   └── test_agent.py       # offline test proving the investigate loop's step cap holds
+├── db/
+│   ├── init.sql            # schema for fresh installs
+│   └── migrations/         # migrations for existing databases
+├── docker-compose.yml
+├── Dockerfile
+└── requirements.txt
+```
 
-## Why this structure
+`app/retrieval.py` exists specifically so `agent.py` doesn't import from
+`main.py` (which would create a circular import once `main.py` imports the
+agent back) — retrieval logic exists in exactly one place either way.
 
-- `app/db.py` — one place to open connections, pgvector's Python type registered
-  so vectors pass through as plain Python lists
-- `app/gemini_client.py` — all LLM calls isolated here, including the model
-  fallback chain, so swapping models or adjusting retry behavior never touches
-  endpoint code
-- `app/chunking.py` — isolated so you can swap strategies without touching ingestion logic
-- `app/main.py` — thin HTTP layer; the RAG logic (retrieval, confidence gate,
-  generation) is readable top to bottom in `/chat`
-- `app/static/index.html` — single-file frontend (HTML/CSS/JS, no build step)
-  served directly by FastAPI's `StaticFiles`, so there's no separate frontend
-  server or CORS setup to manage
+## What's deliberately left for a next phase
+
+- **Wiring `/chat/agent` into the frontend** — currently Swagger-only
+- **Hybrid search (vector + full-text)** — ops data has exact identifiers
+  (case IDs, error codes) that pure vector similarity handles poorly;
+  Postgres supports `tsvector` natively alongside `pgvector`
+- **RAG evaluation dashboard** — a golden Q&A set with tracked
+  retrieval/answer-quality metrics
+- **Auth, structured logging**
 
 ## Lessons learned / troubleshooting notes
 
-Real issues hit during this build, kept here since they're useful context for
-anyone (including future me) extending this — several of these turned into
-the most interesting parts of the project to talk about:
+Real issues hit and fixed during this build — kept here because several of
+these are more interesting to discuss than the features themselves:
 
 **Database / retrieval**
-- **pgvector `<=>` operator needs an explicit cast.** `psycopg2` + `register_vector`
-  handles the *insert* path fine via an assignment cast, but the `<=>` similarity
-  operator only resolves implicit casts — so the query needs `%s::vector`
-  explicitly, or it fails with `operator does not exist: vector <=> numeric[]`.
-- **Global retrieval across all documents causes cross-document confusion**
-  once you have more than one doc uploaded — the top-K chunks can come from
-  the wrong file entirely. Fixed by adding optional `document_ids` scoping to
-  `/chat`, which adds a `WHERE c.document_id = ANY(%s)` filter before the
-  similarity ordering.
-- **Confident-sounding answers from weak retrieval are worse than no answer.**
-  Added a confidence gate: if the top match's cosine distance exceeds a
-  threshold, the app says it found nothing relevant instead of letting Gemini
-  generate a plausible-sounding answer from irrelevant chunks.
+- `pgvector`'s `<=>` operator needs an explicit `%s::vector` cast in the
+  query — `psycopg2`'s `register_vector` handles inserts fine via an
+  assignment cast, but similarity search only resolves implicit casts.
+- Global retrieval across all documents causes cross-document confusion
+  once more than one is uploaded — fixed with optional `document_ids`
+  scoping.
+- A confident-sounding answer from weak retrieval is worse than no answer —
+  the confidence gate refuses to generate when the top match is too
+  dissimilar.
+- A loosely-phrased question isn't necessarily closest-by-cosine to the
+  section that best answers it (`@doc`'s original bug) — fixed with a wide
+  candidate pool plus one LLM *selection* call, not more embedding tuning.
+- A fixed-size context window either truncates long answers or bleeds into
+  neighboring sections — fixed with heading-boundary detection instead of
+  window-size guessing.
 
 **Gemini API / model config**
-- **`gemini-embedding-001` returns 3072-dim vectors by default**, truncated to
-  768 via `output_dimensionality` in `EmbedContentConfig` to match the pgvector
-  column (kept at 768 since pgvector's IVFFlat index doesn't support >2000 dims,
-  and 768 is sufficient for this use case).
-- **Don't pin the Gemini client to `api_version: "v1"`.** The older `v1` REST
-  surface doesn't recognize `systemInstruction` (or `responseMimeType`/
-  `responseSchema`) — those require the default `v1beta` surface. This one
-  regressed twice during development after being "fixed" in chat but not
-  actually saved to the file — worth double-checking with
-  `findstr /n "api_version" app\gemini_client.py` after any Gemini-related edit.
-- **Hard-coded dated model strings get cut off without much warning.**
-  `gemini-2.5-flash` was pulled from new-user access ahead of its published
-  deprecation date. Switching to an alias like `gemini-flash-latest` helps,
-  but aliases can silently point to a model with a much stricter free-tier
-  quota than expected (see below) — so this alone isn't a complete fix.
-- **Free-tier daily quotas are per (project, model), and can be surprisingly
-  low** — as low as 20 requests/day per model on this project, verified
-  directly on the AI Studio quota dashboard rather than trusted from
-  inconsistent third-party blog posts. The real fix was a **model fallback
-  chain** (`CHAT_MODEL_FALLBACK_CHAIN` in `gemini_client.py`): every
-  `generate_content` call tries models in priority order by actual daily
-  headroom, automatically moving to the next model on a 429 (quota) or 404
-  (unavailable) instead of failing the request. 5xx server errors get retried
-  on the *same* model with backoff first, since those are usually transient;
-  quota/availability errors move to the *next* model instead, since retrying
-  those won't help.
-- **`generate_content` and `embed_content` draw from separate quota pools** —
-  embedding calls didn't contribute to the chat quota exhaustion seen during
-  heavy upload testing.
+- `gemini-embedding-001` is text-only; true multimodal retrieval needs
+  `gemini-embedding-2`, which embeds text and images into one shared space.
+- Don't pin the client to `api_version: "v1"` — the older REST surface
+  doesn't recognize `systemInstruction`; this regressed more than once
+  after being "fixed" in conversation but not actually saved to disk.
+- Hard-coded dated model strings get cut off without much warning
+  (`gemini-2.5-flash` was pulled from new-user access ahead of its
+  published deprecation date) — an alias helps but isn't a complete fix,
+  since aliases can silently point to a model with a much stricter quota.
+- Free-tier daily quotas are per (project, model) and can be surprisingly
+  low (as low as 20/day for some models) — verified directly on the AI
+  Studio dashboard, not trusted from inconsistent third-party numbers. The
+  real fix was a model fallback chain, not picking one "better" model.
+- `generate_content` and `embed_content` draw from separate quota pools.
+- LangGraph node names can't collide with state field names — naming a
+  node `"answer"` when the state also has an `answer` field raised
+  `ValueError: 'answer' is already being used as a state key` at import
+  time.
 
 **Frontend**
-- **`GET` requests can be silently browser-cached** even with no explicit
-  cache headers, causing newly uploaded documents to not appear in the
-  sidebar immediately. Fixed with `cache: 'no-store'` on the fetch call and a
-  `Cache-Control: no-store` response header on `/documents`.
-- **Deduping retrieved sources by filename matters.** Returning one source
-  entry per retrieved chunk (rather than per unique document) caused the same
-  filename to render multiple times in a row under an answer. Sources are now
-  grouped by filename, with all matching snippets available under one
-  expandable tag.
+- `GET` requests can be silently browser-cached even with no explicit
+  cache headers — fixed with `cache: 'no-store'` plus a matching response
+  header.
+- Right-clicking an inline `<svg>` never offers "save as image" — only a
+  canvas-based PNG export actually gives the user a real downloadable file.
+- A flat size multiplier on generated diagrams magnifies bad layout instead
+  of fixing it — the real fix is layout constraints in the *generation*
+  prompt; rendering only needed adaptive (not flat) sizing on top of that.
+- Styling part of a plain `<textarea>`'s text (e.g. coloring just `@doc`
+  blue) isn't possible natively — needs a transparent-text textarea
+  stacked over a mirrored, styled backdrop `div`, kept in sync on every
+  keystroke.
+
+**Agent design**
+- A numeric confidence score with no evaluation data to calibrate it
+  against is fake precision — `evidence_status` is a categorical label
+  (`sufficient`/`insufficient`/`conflicting`), not a float.
+- A bounded loop needs real memory (`investigation_steps`), or it can waste
+  its step budget re-deriving the same partial conclusion twice.
+- Never trust a model to self-limit a loop it's inside of — the step cap
+  is enforced in code and proven with an offline test that mocks the model
+  to always ask for one more iteration and confirms the cap still holds.
+- The investigate loop's diagnostic checks come from whatever's actually
+  retrieved, not hardcoded graph nodes — otherwise it's a single
+  domain-specific workflow wearing an "agent" label, not something that
+  generalizes.
