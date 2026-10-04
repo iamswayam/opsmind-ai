@@ -1,36 +1,45 @@
-# OpsMind AI
+<div align="center">
+  <h1>OpsMind AI</h1>
+  <p><strong>Operational answers, grounded in your own documents.</strong></p>
+  <p>Search SOPs, incident reports, runbooks, and diagrams with a document-aware AI copilot.</p>
+  <p>
+    <a href="#quick-start">Quick start</a> ·
+    <a href="#features">Features</a> ·
+    <a href="#architecture">Architecture</a> ·
+    <a href="#endpoints">API</a>
+  </p>
+  <p>
+    <img alt="Python 3.11" src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white">
+    <img alt="FastAPI" src="https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white">
+    <img alt="PostgreSQL and pgvector" src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white">
+    <img alt="Google Gemini" src="https://img.shields.io/badge/AI-Gemini-4285F4?logo=googlegemini&logoColor=white">
+    <img alt="Docker Compose" src="https://img.shields.io/badge/Run-Docker%20Compose-2496ED?logo=docker&logoColor=white">
+  </p>
+</div>
 
-An internal copilot for support/ops teams: upload SOPs, PDFs, DOCX files,
-logs, and incident reports, then get answers grounded in that content —
-"why did this fail," "show the relevant SOP," "summarize this incident" —
-backed by the actual uploaded documents, not the model's general knowledge.
+<p align="center">
+  <img src="docs/images/opsmind-desktop.png" alt="OpsMind AI desktop interface with document upload, sample runbooks, and the grounded chat workspace" width="100%">
+</p>
+<p align="center"><sub>Desktop UI preview. The listed filenames are fictional demo data.</sub></p>
 
-Built as a hands-on portfolio project to go beyond "RAG tutorial" territory:
-a real agentic decision layer (not just retrieve-then-generate), multimodal
-retrieval across text and images in one vector space, an exact-answer mode
-that guarantees verbatim source text instead of LLM paraphrasing, and a
-resilience layer that survives Gemini's free-tier quota and model-deprecation
-churn automatically. Every design decision below was made — and every bug
-was hit and fixed — while actually building it, not copied from a template.
+---
 
-## What it does
+OpsMind is a document-grounded copilot for support and operations teams. Answers are retrieved from uploaded files, not generated from model knowledge alone. It supports exact source excerpts, grounded diagrams, multimodal PDF retrieval, and bounded diagnostic investigations.
 
-- **Ask normal questions** and get synthesized, grounded answers with
-  clickable sources (including page numbers and, for scanned/DOCX files,
-  reconstructed content)
-- **`@doc <question>`** — finds the closest matching answer already written
-  in your document and returns it **verbatim**, preserving the source's own
-  paragraph structure, instead of a generated summary
-- **`@art <topic>`** — generates an architecture/flow diagram grounded in
-  your documents, rendered as an actual interactive SVG (open full-size,
-  export as PNG)
-- **Upload images embedded in PDFs**, not just text — OpsMind embeds and
-  retrieves them in the *same* vector space as text, so a question can
-  surface a relevant diagram, not just a paragraph that mentions one
-- **Multi-step investigation** via a LangGraph agent that triages each
-  question and decides whether to answer directly, ask a clarifying
-  question, or work through a bounded diagnostic loop — the actual
-  difference between "a RAG demo" and something agentic
+## Features
+
+<table>
+  <tr>
+    <td width="33%"><strong>Grounded answers</strong><br>Retrieve relevant passages with source files and page references. A confidence gate avoids answering from weak matches.</td>
+    <td width="33%"><strong>Verbatim mode</strong><br><code>@doc</code> selects and returns an answer from the source document without rewriting it.</td>
+    <td width="33%"><strong>Document diagrams</strong><br><code>@art</code> creates an interactive, exportable diagram based on retrieved content.</td>
+  </tr>
+  <tr>
+    <td><strong>Text + image retrieval</strong><br>PDF text and embedded figures share a multimodal embedding space.</td>
+    <td><strong>Bounded investigations</strong><br>A LangGraph agent can clarify a request or follow a limited diagnostic loop.</td>
+    <td><strong>Resilient model calls</strong><br>Gemini requests use model fallbacks for quota limits and unavailable models.</td>
+  </tr>
+</table>
 
 ## Stack
 
@@ -39,15 +48,37 @@ multimodal embeddings, a fallback chain of chat models for generation) ·
 LangGraph · Docker · vanilla HTML/CSS/JS frontend (no framework, no build
 step, served directly by FastAPI)
 
-## Run it
+## Quick start
 
-1. Get a free Gemini API key at [aistudio.google.com](https://aistudio.google.com) — no card required.
-2. `cp .env.example .env` and paste your key into `GEMINI_API_KEY`.
-3. `docker compose up --build`
-4. Open **http://localhost:8000/** for the chat UI. Swagger docs are at
-   **http://localhost:8000/docs**, including `/chat/agent` (the LangGraph
-   endpoint), which isn't wired into the frontend yet.
-5. Run tests: `docker compose exec api python -m pytest tests/ -v`
+1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/).
+2. Copy `.env.example` to `.env`:
+
+    ```powershell
+    Copy-Item .env.example .env
+    ```
+
+  On macOS or Linux, use `cp .env.example .env`.
+3. Replace the placeholder `GEMINI_API_KEY` value in `.env` with your key.
+4. Build and start the app:
+
+    ```sh
+    docker compose up --build
+    ```
+
+5. Open [http://localhost:8000](http://localhost:8000). Interactive API docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+### Tests and CI
+
+With Compose running, execute the test suite from a second terminal:
+
+```sh
+docker compose exec -T api python -m pytest -q tests/
+```
+
+GitHub Actions runs this suite on pushes and pull requests. It uses real pgvector retrieval while stubbing Gemini calls, so CI needs no Gemini secret and consumes no API quota.
+
+<details>
+<summary><strong>Architecture details</strong></summary>
 
 ## Architecture
 
@@ -106,6 +137,8 @@ AI Studio dashboard rather than trusted from inconsistent blog posts. On a
 429 (quota) or 404 (deprecated/unavailable), the next model is tried
 automatically; transient 5xx errors retry the *same* model first.
 
+</details>
+
 ## Endpoints
 
 | Endpoint | Method | What it does |
@@ -118,6 +151,9 @@ automatically; transient 5xx errors retry the *same* model first.
 | `/chat/stream` | POST | Same, streamed via Server-Sent Events |
 | `/chat/agent` | POST | Runs the LangGraph agent instead of the linear pipeline; response includes `intent` and `investigation_steps` |
 | `/health` | GET | Liveness check |
+
+<details>
+<summary><strong>Data model and project layout</strong></summary>
 
 ## Database schema
 
@@ -135,6 +171,8 @@ columns) existed.
 
 ```
 opsmind-ai/
+├── .env.example
+├── .github/workflows/ci.yml
 ├── app/
 │   ├── main.py           # HTTP layer: chat/doc/art/agent endpoints, upload, extraction
 │   ├── agent.py           # LangGraph agentic layer: state, nodes, routing
@@ -145,18 +183,23 @@ opsmind-ai/
 │   ├── db.py               # connection handling, pgvector registration
 │   └── static/index.html   # single-file frontend
 ├── tests/
-│   └── test_agent.py       # offline test proving the investigate loop's step cap holds
+│   ├── conftest.py         # test-only environment defaults
+│   ├── test_agent.py       # offline investigation step-cap test
+│   └── test_api.py         # API-to-Postgres chat integration test
 ├── db/
 │   ├── init.sql            # schema for fresh installs
 │   └── migrations/         # migrations for existing databases
 ├── docker-compose.yml
 ├── Dockerfile
-└── requirements.txt
+├── requirements.txt
+└── docs/images/opsmind-desktop.png
 ```
 
 `app/retrieval.py` exists specifically so `agent.py` doesn't import from
 `main.py` (which would create a circular import once `main.py` imports the
 agent back) — retrieval logic exists in exactly one place either way.
+
+</details>
 
 ## What's deliberately left for a next phase
 
@@ -167,6 +210,9 @@ agent back) — retrieval logic exists in exactly one place either way.
 - **RAG evaluation dashboard** — a golden Q&A set with tracked
   retrieval/answer-quality metrics
 - **Auth, structured logging**
+
+<details>
+<summary><strong>Engineering notes and lessons learned</strong></summary>
 
 ## Lessons learned / troubleshooting notes
 
@@ -237,3 +283,5 @@ these are more interesting to discuss than the features themselves:
   retrieved, not hardcoded graph nodes — otherwise it's a single
   domain-specific workflow wearing an "agent" label, not something that
   generalizes.
+
+</details>
