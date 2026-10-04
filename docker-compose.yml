@@ -17,6 +17,8 @@ services:
     build: .
     container_name: opsmind-api
     env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:devpass@db:5432/opsmind}
     ports:
       - "8000:8000"
     depends_on:

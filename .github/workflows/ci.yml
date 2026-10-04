@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Start services
+        run: |
+          printf 'GEMINI_API_KEY=test-key\nDATABASE_URL=postgresql://postgres:devpass@db:5432/opsmind\n' > .env
+          docker compose up --build -d
+
+      - name: Wait for services
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T db pg_isready -U postgres -d opsmind; then
+              break
+            fi
+            sleep 2
+          done
+          docker compose exec -T db pg_isready -U postgres -d opsmind
+
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T api python -c \
+              "from urllib.request import urlopen; urlopen('http://localhost:8000/health')"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'API did not become healthy in time.'
+          exit 1
+
+      - name: Run tests
+        run: docker compose exec -T api python -m pytest -q tests/
+
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop services
+        if: always()
+        run: docker compose down --volumes --remove-orphans

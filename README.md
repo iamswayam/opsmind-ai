@@ -47,7 +47,7 @@ step, served directly by FastAPI)
 4. Open **http://localhost:8000/** for the chat UI. Swagger docs are at
    **http://localhost:8000/docs**, including `/chat/agent` (the LangGraph
    endpoint), which isn't wired into the frontend yet.
-5. Run tests: `docker compose exec api pytest tests/ -v`
+5. Run tests: `docker compose exec api python -m pytest tests/ -v`
 
 ## Architecture
 
